@@ -1,0 +1,4 @@
+interface:
+  display_name: "Word Writer"
+  short_description: "统一规范 DOC 与 DOCX 的字体、表格和页眉页脚"
+  default_prompt: "Use $word-writer to create or normalize a Word document with the configured Chinese formatting standard."
