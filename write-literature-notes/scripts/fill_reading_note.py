@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,6 @@ REQUIRED_FIELDS = (
     "research_question",
     "methods",
     "results",
-    "innovation",
     "reflection",
 )
 
@@ -40,6 +40,8 @@ STRUCTURE_SUB_RE = re.compile(
 )
 STRUCTURE_SUB_LEFT_INDENT = Cm(0.74)
 STRUCTURE_SUB_HANGING_INDENT = Cm(-0.37)
+INNOVATION_HEADINGS = {"创新", "创新：", "创新:"}
+LIMITATION_HEADINGS = {"不足", "不足：", "不足:"}
 
 
 def file_sha256(path: Path) -> str:
@@ -90,6 +92,69 @@ def normalize_numbered_points(value: Any, *, field_name: str) -> list[str]:
     if len(points) > 1:
         return [f"{index}. {point}" for index, point in enumerate(points, start=1)]
     return points
+
+
+def split_innovation_groups(content: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Return independently numbered innovation and limitation groups.
+
+    Prefer the explicit innovations/limitations schema. Retain the old innovation
+    list only when its section markers make the split deterministic.
+    """
+    uses_new_schema = "innovations" in content or "limitations" in content
+    uses_legacy_schema = "innovation" in content
+    if uses_new_schema and uses_legacy_schema:
+        raise ValueError(
+            "use either innovations/limitations or legacy innovation, not both"
+        )
+
+    if uses_new_schema:
+        innovations = normalize_numbered_points(
+            content.get("innovations"), field_name="innovations"
+        )
+        limitations = normalize_numbered_points(
+            content.get("limitations"), field_name="limitations"
+        )
+    elif uses_legacy_schema:
+        innovation_items: list[str] = []
+        limitation_items: list[str] = []
+        current = innovation_items
+        saw_limitation_heading = False
+        for line in normalize_lines(content.get("innovation")):
+            marker = line.strip()
+            if marker in INNOVATION_HEADINGS:
+                if saw_limitation_heading:
+                    raise ValueError(
+                        "legacy innovation section cannot restart after limitations"
+                    )
+                current = innovation_items
+                continue
+            if marker in LIMITATION_HEADINGS:
+                current = limitation_items
+                saw_limitation_heading = True
+                continue
+            current.append(line)
+
+        if (
+            "不足" in str(content.get("innovation_label") or "")
+            and not saw_limitation_heading
+        ):
+            raise ValueError(
+                "legacy innovation_label mentions limitations but the innovation "
+                "content has no explicit '不足：' separator; migrate to "
+                "innovations/limitations"
+            )
+        innovations = normalize_numbered_points(
+            innovation_items, field_name="innovation"
+        )
+        limitations = normalize_numbered_points(
+            limitation_items, field_name="limitations"
+        )
+    else:
+        raise ValueError("missing required field: innovations")
+
+    if not innovations:
+        raise ValueError("innovations must contain at least one evidence-based point")
+    return innovations, limitations
 
 
 def normalize_structure(value: Any) -> list[str]:
@@ -212,6 +277,7 @@ def load_content(path: Path) -> dict[str, Any]:
     missing = [field for field in REQUIRED_FIELDS if not normalize_lines(data.get(field))]
     if missing:
         raise ValueError("missing required fields: " + ", ".join(missing))
+    split_innovation_groups(data)
     return data
 
 
@@ -273,7 +339,53 @@ def compact_trailing_body_paragraphs(doc: Document) -> None:
     paragraph.paragraph_format.keep_with_next = False
 
 
-def build(template: Path, content_path: Path, output: Path) -> None:
+def audit_output(
+    output: Path,
+    *,
+    innovation_label: str,
+    innovation_lines: list[str],
+) -> dict[str, Any]:
+    doc = Document(output)
+    issues: list[str] = []
+    try:
+        validate_template(doc)
+    except ValueError as exc:
+        issues.append(str(exc))
+
+    if len(doc.tables) == 1 and len(doc.tables[0].rows) == 13:
+        table = doc.tables[0]
+        if table.cell(10, 1).text.strip() != innovation_label:
+            issues.append("row 11 label does not match innovation content")
+        actual_lines = [
+            paragraph.text.strip()
+            for paragraph in table.cell(10, 2).paragraphs
+            if paragraph.text.strip()
+        ]
+        if actual_lines != innovation_lines:
+            issues.append("row 11 innovation/limitation numbering is inconsistent")
+        if table.cell(12, 1).text.strip():
+            issues.append("row 13 remarks content must be blank")
+
+    body_paragraphs = [paragraph.text for paragraph in doc.paragraphs]
+    if len(body_paragraphs) != 1 or body_paragraphs[0].strip():
+        issues.append("document body must end with exactly one empty paragraph")
+
+    return {
+        "file": str(output.resolve()),
+        "status": "pass" if not issues else "fail",
+        "table_rows": len(doc.tables[0].rows) if doc.tables else 0,
+        "innovation_label": innovation_label,
+        "issues": issues,
+    }
+
+
+def build(
+    template: Path,
+    content_path: Path,
+    output: Path,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
     content = load_content(content_path)
     structure = normalize_structure(content["structure"])
     research_question = normalize_numbered_points(
@@ -281,6 +393,18 @@ def build(template: Path, content_path: Path, output: Path) -> None:
     )
     methods = normalize_numbered_points(content["methods"], field_name="methods")
     results = normalize_numbered_points(content["results"], field_name="results")
+    innovations, limitations = split_innovation_groups(content)
+    innovation_label = "创新与不足" if limitations else "创新"
+    innovation_lines = ["创新：", *innovations]
+    if limitations:
+        innovation_lines.extend(["不足：", *limitations])
+
+    if output.suffix.lower() != ".docx":
+        raise ValueError("output path must end with .docx")
+    if output.exists() and not force:
+        raise FileExistsError(
+            f"output already exists: {output}; use a new path or pass --force"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(template, output)
 
@@ -303,8 +427,8 @@ def build(template: Path, content_path: Path, output: Path) -> None:
     fill_cell(table.cell(7, 2), research_question)
     fill_cell(table.cell(8, 2), methods)
     fill_cell(table.cell(9, 2), results)
-    fill_label(table.cell(10, 1), str(content.get("innovation_label") or "创新与不足"))
-    fill_cell(table.cell(10, 2), content["innovation"], bold_headings=True)
+    fill_label(table.cell(10, 1), innovation_label)
+    fill_cell(table.cell(10, 2), innovation_lines, bold_headings=True)
     fill_cell(table.cell(11, 2), content["reflection"])
     # The retained remarks row is manual-only. Ignore legacy JSON "notes" values.
     fill_cell(table.cell(12, 1), "")
@@ -313,20 +437,53 @@ def build(template: Path, content_path: Path, output: Path) -> None:
     doc.core_properties.title = str(content["title"])
     doc.core_properties.subject = "文献阅读笔记"
     doc.save(output)
+    report = audit_output(
+        output,
+        innovation_label=innovation_label,
+        innovation_lines=innovation_lines,
+    )
+    if report["status"] != "pass":
+        raise ValueError("output audit failed: " + "; ".join(report["issues"]))
+    report["innovation_count"] = len(innovations)
+    report["limitation_count"] = len(limitations)
+    return report
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Fill the retained literature-reading-note DOCX template.")
     parser.add_argument("--content", required=True, type=Path, help="UTF-8 JSON content file")
     parser.add_argument("--out", required=True, type=Path, help="output DOCX path")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing output file; never overwrites the bundled template",
+    )
     args = parser.parse_args()
 
     skill_dir = Path(__file__).resolve().parents[1]
     template = resolve_template(skill_dir)
     if template.resolve() == args.out.resolve():
         raise ValueError("output path must differ from template path")
-    build(template.resolve(), args.content.resolve(), args.out.resolve())
+    report = build(
+        template.resolve(),
+        args.content.resolve(),
+        args.out.resolve(),
+        force=args.force,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(
+            json.dumps(
+                {"status": "error", "error": str(exc)},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)

@@ -1,0 +1,41 @@
+# Runtime capability and failure handling
+
+## Capability levels
+
+| Capability | Minimum requirement | If missing |
+| --- | --- | --- |
+| Audit/normalize DOCX | Python 3.10+, `python-docx`, `lxml` | blocked |
+| Convert legacy DOC | LibreOffice or Microsoft Word | ask for DOCX or install converter |
+| Render DOCX | LibreOffice or Microsoft Word | structural-only draft; visual QA blocked |
+| Exact Chinese typography | SimHei/黑体 and Microsoft YaHei/微软雅黑 | install fonts or agree substitutes |
+| Rasterize PDF pages | Installed document/PDF workflow, Poppler or equivalent | inspect PDF through another available renderer |
+
+Run `scripts/check_environment.py` with every candidate Python interpreter. Choose the one whose JSON reports the core packages available. On Windows, use `python -X utf8` when a validator reads Chinese Markdown; this avoids locale-dependent GBK decoding failures.
+
+## Fresh-computer sequence
+
+1. Resolve the skill directory from the invoked skill; never hard-code a prior machine's absolute path.
+2. Run the preflight with the selected interpreter.
+3. If Python packages are missing, first try another already configured workspace interpreter. Install packages only with user authorization and in an isolated environment.
+4. If fonts are missing, do not silently substitute. Structural work can continue, but rendered pages are not reproducible.
+5. If conversion or rendering is missing, keep the source untouched and report the precise missing capability.
+
+## Failure matrix
+
+| Symptom | Likely cause | Action |
+| --- | --- | --- |
+| `ModuleNotFoundError: docx` | Wrong interpreter or missing `python-docx` | switch interpreter; otherwise install dependency |
+| `.doc` cannot convert | No LibreOffice/Word | request `.docx` or install one converter |
+| audit reports nonstandard fonts | unnormalized OOXML story or newly edited output | normalize again, then audit the exact final file |
+| rendered CJK glyphs differ | fonts missing/substituted | install required fonts and re-render |
+| footer contains extra text | source footer not fully cleared or later edit reintroduced it | normalize exact final file again |
+| images disappear | toolchain damaged relationships/content | stop, restore source copy, use a preservation-capable editor |
+| output already exists | unsafe overwrite attempt | select a new name or obtain explicit overwrite authorization and use `--force` |
+| audit passes but layout clips | structural checks cannot detect pagination | correct layout and repeat audit + render |
+| security audit reports findings or warnings | credential, private path, suspicious file, symlink or uninspected binary | stop distribution; remove accidental material or complete a manual provenance review, then rerun |
+
+## Resource-limited behavior
+
+For long documents, keep the same correctness gates but reduce context load: obtain a structural inventory first, normalize in one pass, and inspect rendered pages in batches. Do not sample pages for final acceptance; every page must still be viewed. Avoid repeated full-document rewrites when only one localized content edit is requested.
+
+Do not copy passwords, cookies, API keys or access tokens into temporary scripts, logs, examples or skill assets. Keep required authentication in an approved secret store or environment variable and record only the variable name. Before publishing the skill, run `scripts/audit_skill_security.py`; scan the task directory with `--root` when the output is expected to be credential-free.

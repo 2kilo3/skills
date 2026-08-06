@@ -1,11 +1,27 @@
 ---
 name: project-learning-sop
-description: "引导用户系统学习本地或 GitHub 代码库，建立项目地图、运行并追踪真实功能链路，并在明确授权后通过小型修改验证理解。用于‘学习/带读/看懂这个项目或源码’‘从零理解仓库’‘分析项目并教我修改’等请求；按阶段讲解、提问和验收，可生成 guide.md 与离线 course.html。"
+description: "引导用户系统学习本地或 GitHub 代码库，建立项目地图、运行并追踪真实功能链路，并在明确授权后通过小型修改验证理解。用于‘学习/带读/看懂这个项目或源码’‘从零理解仓库’‘分析项目并教我修改’等请求；支持新电脑预检、低算力/大型仓库分阶段分析、异常恢复和证据门禁，可生成 guide.md 与离线 course.html。"
 ---
 
 # Project Learning SOP（项目学习 SOP）
 
 将任意代码库（本地目录或 GitHub 仓库）转化为一段与目标匹配的引导式学习旅程：可以快速导览，也可以深入一条功能链路，或继续到真实修改。本技能的核心不是“替学习者读懂代码”，而是**带着学习者建立自己的项目心智地图**。
+
+## 设计与执行合同
+
+本 skill 是状态驱动的学习编排器，不是通用代码修改器。它把容易漂移的决策固定为五个控制面：模式决定执行到哪个 Phase；权限决定哪些动作允许发生；证据等级决定哪些结论能写成事实；状态文件决定中断后从哪里恢复；验证脚本决定交付物能否完成。
+
+三个模式只允许以下产出：快速导览默认只在对话中总结；深度带读交付 `notes/guide.md`；完整实战交付 `notes/guide.md` 与 `notes/course.html`。`notes/working.md` 始终是内部状态，不是额外交付物。
+
+## SOP 总览
+
+0. **预检与定界**：检查宿主机、仓库规模、目标、模式、工作区和分项权限，建立或恢复唯一状态文件。
+1. **建立地图**：执行 Phase 1-2，用项目用途、目录和清单把搜索空间缩到目标子系统。
+2. **获得行为证据**：执行 Phase 3-4，在授权范围内做最小运行并记录一次真实行为及数据流。
+3. **追踪实现**：执行 Phase 5-6，形成核心抽象和一条精确到文件、符号、行号的调用链。
+4. **学习验收**：Phase 7 用问题和导航任务验证理解；深度带读在此交付并结束。
+5. **修改验证**：只有明确授权时执行 Phase 8，用一个实质小改动和定向测试证明理解。
+6. **最终复核**：Phase 9 对比测试基线、审查 diff、生成并验证交付物；任何验证后的修改都使旧结果失效。
 
 ## 核心理念（必须贯穿全程）
 
@@ -29,7 +45,15 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 
 ## 先选择或恢复模式
 
-开始时读取 `references/workflow-state.md`：若已有 `notes/working.md`，先核对仓库基线并恢复“下一动作”；否则选择快速导览、深度带读或完整实战。用户未明确指定时默认快速导览，完成初步地图后再询问是否升级。不要重复询问状态中已经记录的信息。
+开始时完整读取 `references/workflow-state.md` 与 `references/runtime-and-failures.md`。若已有 `notes/working.md`，先核对仓库基线并恢复“下一动作”；否则选择快速导览、深度带读或完整实战。用户未明确指定时默认快速导览，完成初步地图后再询问是否升级。不要重复询问状态中已经记录的信息。
+
+在新电脑、首次接触仓库或仓库基线变化时运行：
+
+```powershell
+python -X utf8 scripts/check_environment.py --repo "C:\absolute\repo"
+```
+
+按报告中的 `status` 与 `repository.resource_mode` 执行。`targeted` 或 `staged` 模式必须先读清单和入口，再只打开目标子系统；不得把整个仓库一次性载入上下文。`blocked` 时记录恢复条件并停止受影响分支。
 
 ## 工作流程（Phase 0-9）
 
@@ -38,6 +62,7 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 **路径与产出纪律**：Phase 0 先确定独立的学习工作区；除非学习者明确同意，不在目标仓库内创建笔记。下文的 `notes/` 均相对于学习工作区。所有中间分析只累积到内部底稿 `notes/working.md`，不创建阶段笔记。面向学习者的文件按模式产生，不得超过 `notes/guide.md` 与 `notes/course.html`。
 
 ### Phase 0：目标设定与前置检查
+- 运行环境/仓库预检；记录 Python、Git、ripgrep、仓库规模、资源模式与缺失能力。GitHub 项目尚未克隆时先不传 `--repo`，获得克隆授权并完成后再补跑。
 - 确认项目来源与学习工作区：本地目录 / GitHub 链接 / 当前目录；克隆前确认目标位置，默认保留完整历史，需要浅克隆时记录原因并在 Phase 6 前补全历史。
 - 确认学习目标层级（缩小搜索空间）：整体理解 / 理解一个子系统 / 理解一个功能 / 理解一次调用。
 - 确认学习者 Git 基础（`clone`、`diff`、`log`、`blame` 是否会用）；不足则先花 10 分钟补基础。
@@ -107,6 +132,7 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 - 完整实战模式在此一次性生成并预览最终 `guide.md` 与离线 `course.html`；代码导航以最终 commit 或工作树快照为准。
 - 分别运行 `scripts/validate_artifacts.py guide ...` 与 `course ...`；任一返回非 0 都要修正后重跑。
 - 任一交付物在成功校验后发生变化，都要重新校验；只报告最终文件对应的最新结果。
+- 交付前分别对 skill 根目录与 `notes/` 运行 `scripts/audit_skill_security.py`；任何发现或未审查二进制都会阻止发布，修复后必须重跑。
 - 给出下一步建议（新的功能链路 / 更深子系统 / 参与贡献）。
 - 详细指引见 `references/phase-8-9.md`。
 
@@ -120,6 +146,7 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 | 文件 | 内容 | 何时读取 |
 | --- | --- | --- |
 | `references/workflow-state.md` | 学习模式、状态结构、证据等级、恢复规则、各模式结束条件 | Phase 0 或恢复任务时 |
+| `references/runtime-and-failures.md` | 新电脑预检、低算力/大型仓库策略、状态转移与异常矩阵 | Phase 0；能力、资源或权限变化时重读 |
 | `references/phase-0-2.md` | Phase 0-2 详细指引：目标设定话术、5 问模板、目录职责解读表、配置文件速查、Git 基础速成 | Phase 0-2 开始时 |
 | `references/phase-3-4.md` | Phase 3-4 详细指引：安全运行、最小运行面、行为流程梳理法、数据模型分析法 | Phase 3-4 开始时 |
 | `references/phase-5-7.md` | Phase 5-7 详细指引：核心抽象速查表、调用链追踪法、测试阅读法、Issues/PR 阅读法、交付物汇总流程 | Phase 5-7 开始时 |
@@ -127,6 +154,19 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 | `references/guide-spec.md` | **guide.md 的完整规范**：结构模板、功能→文件导航表格式、mermaid 图表规范、术语表要求 | 深度带读 Phase 7 或完整实战 Phase 9 |
 | `references/html-course-spec.md` | **course.html 的完整规范**：教学弧线、强制交互元素、代码对照、设计系统与完整骨架 | 完整实战 Phase 9 |
 | `references/checklist.md` | 全阶段验收清单与最终 8 问验收 | 每个 Phase 结束时 + Phase 7/9 |
+
+## 完成合同
+
+只有当前模式要求的 Phase 全部达到 `passed`，或明确记录了允许继续的 `unverified/skipped`，才能结束。交付物必须基于同一仓库 SHA/工作树快照生成并通过最新一次 `validate_artifacts.py`，且 skill 根目录与交付目录的安全扫描均为 `status=pass`；完整实战还必须证明没有新增测试失败、没有调试残留、修改在授权范围内。缺少运行、浏览器预览、安全扫描或学习者验收时，应准确报告未验证项，不得把静态分析表述为完整毕业。
+
+安全扫描命令：
+
+```powershell
+python -X utf8 scripts/audit_skill_security.py
+python -X utf8 scripts/audit_skill_security.py --root "C:\absolute\learning-root\notes"
+```
+
+扫描报告不回显秘密值。发现真实凭据时移除意外副本；若它可能已提交或分享，提醒轮换/吊销并在修复后重跑。
 
 ## 关键纪律
 
@@ -136,3 +176,10 @@ description: "引导用户系统学习本地或 GitHub 代码库，建立项目�
 - **交付物服从模式**：快速导览默认无文件，深度带读只产出 `guide.md`，完整实战只产出 `guide.md` 与 `course.html`；`working.md` 是内部状态，不属于交付物。
 - **写操作必须授权**：默认只读；安装依赖、启动外部服务、修改源码、创建分支和提交代码按类别分别确认。
 - **修改实践必须可证明**：完整毕业至少完成 1 个实质修改任务，包含运行证据、定向测试和学习者解释；未授权修改时只完成学习交付，不宣称通过实践毕业。
+- **敏感信息不得进入 skill 或学习交付物**：只记录环境变量名和配置来源，不复制值；安全扫描有发现或警告时停止发布。
+
+## 工具
+
+- `scripts/check_environment.py`：新电脑、仓库规模和资源模式预检。
+- `scripts/validate_artifacts.py`：guide/course 的路径、源码、导航与交互门禁。
+- `scripts/audit_skill_security.py`：不回显秘密值的凭据、私有路径与归档内容扫描。

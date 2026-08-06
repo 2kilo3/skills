@@ -97,6 +97,17 @@
 
 ### 9.4 产出最终交付（完整实战严格两份）
 
+在发布前先执行安全门禁：
+
+```powershell
+python -X utf8 <skill-root>/scripts/audit_skill_security.py
+python -X utf8 <skill-root>/scripts/audit_skill_security.py --root <learning-root>/notes
+```
+
+两次都必须返回 `status=pass`，且 `findings`、`warnings` 为空。扫描报告只记录规则、文件和行号，不回显命中的秘密值。发现 `.env`、私钥、令牌、密码赋值、带凭据 URL、真实用户路径或来源不明二进制时停止发布；移除意外副本，已可能暴露的真实凭据需轮换/吊销，然后重新生成受影响交付物并重跑全部校验。不要把密钥值复制到 `working.md`、guide 或 course；只记录环境变量名和配置来源。
+
+安全门禁通过后再交付：
+
 1. `notes/guide.md`（导航指南，最终版）——呈现给学习者，现场做一次"导航练习"（随机功能 → 找到对应文件/函数）。
 2. `notes/course.html`（交互式课程，最终版）——随最终理解更新。
 3. 下一步建议（写在学习者确认后）：

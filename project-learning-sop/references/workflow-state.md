@@ -25,8 +25,9 @@
 - 目标仓库：<绝对路径或 URL>
 - 学习工作区：<绝对路径>
 - 当前 Phase：<0-9>
-- 当前状态：<pending / in-progress / passed / unverified / skipped>
+- 当前状态：<pending / in-progress / passed / unverified / skipped / blocked>
 - 下一动作：<一个具体动作>
+- 阻塞原因：<无 / 缺少的输入、权限、能力或外部状态>
 
 ## 仓库基线
 - Commit SHA：<值；非 Git 项目标记 N/A>
@@ -62,6 +63,8 @@
 2. 预计耗时较长的安装、运行、生成或渲染前先保存状态。
 3. 获得材料证据后立即追加证据账本，不等整个学习旅程结束。
 4. 进入下一 Phase 前写入 `passed`、`unverified` 或 `skipped` 及验收证据，再更新下一动作。
+
+状态转移必须符合 `references/runtime-and-failures.md`。进入 `blocked` 时同时写明阻塞原因、已尝试动作和唯一恢复动作；阻塞条件未变化前，不得执行依赖该能力的后续 Phase。恢复时先更新为 `in-progress`，再核对受影响证据。
 
 不要另建阶段笔记，也不得让状态停留在旧 Phase 时执行后续 Phase 的任务。
 

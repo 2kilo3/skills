@@ -7,6 +7,7 @@
 ## 阶段门禁
 
 ### Phase 0 完成标准
+- [ ] `check_environment.py` 已运行，`status`、资源模式和缺失能力已记录
 - [ ] 项目来源已确定（本地路径 / GitHub 已 clone / 当前目录）
 - [ ] 学习目标层级已选定（整体 / 子系统 / 功能 / 一次调用）
 - [ ] 学习者 Git 基础已确认或已补课
@@ -14,6 +15,7 @@
 - [ ] 运行、安装、写学习文件、改源码、建分支、提交代码的权限已分别记录
 - [ ] commit SHA、shallow 状态和初始 `git status` 已记录
 - [ ] `notes/working.md` 已创建并记录学习目标
+- [ ] 大型仓库已采用 targeted/staged 策略，排除依赖、构建、缓存和生成目录
 
 ### Phase 1 完成标准
 - [ ] 已阅读 README 与核心文档并提炼要点
@@ -81,6 +83,7 @@
 - [ ] 毕业复核 8 问完成（见下）
 - [ ] `guide.md` 与 `course.html` 已基于最终源码快照生成并预览
 - [ ] `validate_artifacts.py guide` 与 `course` 均返回 0
+- [ ] skill 根目录与 `notes/` 的 `audit_skill_security.py` 均返回 `status=pass`，且 findings/warnings 为空
 - [ ] 最终成功校验之后两份交付物均未再修改
 
 ## 最终 8 问（Phase 7 门禁）

@@ -656,6 +656,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Check an existing DOCX without modifying it.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing output file; input and output must still differ",
+    )
     return parser.parse_args()
 
 
@@ -668,6 +673,12 @@ def main() -> int:
     else:
         if args.output is None:
             raise ValueError("--output is required unless --audit-only is used")
+        if args.input.resolve() == args.output.resolve():
+            raise ValueError("input and output paths must differ; normalize a copy")
+        if args.output.exists() and not args.force:
+            raise FileExistsError(
+                f"output already exists: {args.output}; use a new path or pass --force"
+            )
         report = run_normalization(args.input, args.output, args.page_numbers)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

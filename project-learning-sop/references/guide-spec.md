@@ -151,4 +151,4 @@ flowchart TB
 python <skill-root>/scripts/validate_artifacts.py guide <learning-root>/notes/guide.md <repo-root> --min-rows 3
 ```
 
-小于三个可导航功能的极小项目可把 `--min-rows` 调低，但必须在 `working.md` 记录原因。脚本必须返回 0 才能交付；校验后任何内容变化都会使结果失效，修改后必须重跑，并把最终成功校验作为交付前最后一步。
+小于三个可导航功能的极小项目可把 `--min-rows` 调低，但必须在 `working.md` 记录原因。需要机器可读结果时加 `--json`。脚本必须返回 0 才能交付；校验后任何内容变化都会使结果失效，修改后必须重跑，并把最终成功校验作为交付前最后一步。

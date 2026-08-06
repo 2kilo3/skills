@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from html.parser import HTMLParser
@@ -157,12 +158,21 @@ class CourseParser(HTMLParser):
             module_id = element_id or f"<module-{len(self.modules) + 1}>"
             self.current_module = module_id
             self.module_depth = 1
-            self.modules[module_id] = {"quiz": 0, "source": 0}
+            self.modules[module_id] = {
+                "quiz": 0,
+                "source": 0,
+                "code_pair": 0,
+                "plain_side": 0,
+            }
         elif tag == "section" and self.current_module:
             self.module_depth += 1
 
         if tag == "details" and "quiz" in classes and self.current_module:
             self.modules[self.current_module]["quiz"] += 1
+        if "code-pair" in classes and self.current_module:
+            self.modules[self.current_module]["code_pair"] += 1
+        if "plain-side" in classes and self.current_module:
+            self.modules[self.current_module]["plain_side"] += 1
         if tag == "ol" and "flow" in classes:
             self.has_flow = True
         if "chat" in classes:
@@ -231,10 +241,29 @@ def validate_course(course: Path, repo: Path, min_modules: int, max_modules: int
     if parser.invalid_images:
         errors.append("图片必须使用 data URI：" + ", ".join(parser.invalid_images))
     missing_targets = [target for target in parser.nav_targets if target not in parser.ids]
+    non_module_targets = [
+        target for target in parser.nav_targets if target not in parser.modules
+    ]
+    missing_module_buttons = [
+        module_id for module_id in parser.modules if module_id not in parser.nav_targets
+    ]
+    duplicate_targets = sorted(
+        {
+            target
+            for target in parser.nav_targets
+            if parser.nav_targets.count(target) > 1
+        }
+    )
     if not parser.nav_targets:
         errors.append("导航栏缺少 data-target 按钮")
     elif missing_targets:
         errors.append("导航目标不存在：" + ", ".join(missing_targets))
+    if non_module_targets:
+        errors.append("导航按钮必须指向课程模块：" + ", ".join(non_module_targets))
+    if missing_module_buttons:
+        errors.append("以下课程模块缺少导航按钮：" + ", ".join(missing_module_buttons))
+    if duplicate_targets:
+        errors.append("导航目标重复：" + ", ".join(duplicate_targets))
     if not parser.has_flow:
         errors.append("缺少数据流动画容器 ol.flow")
     if not parser.has_chat:
@@ -245,6 +274,8 @@ def validate_course(course: Path, repo: Path, min_modules: int, max_modules: int
     for module_id, counts in parser.modules.items():
         if counts["source"] < 1:
             errors.append(f"模块 {module_id} 缺少带 data-source/data-lines 的真实代码块")
+        if counts["code_pair"] < 1 or counts["plain_side"] < 1:
+            errors.append(f"模块 {module_id} 缺少代码↔白话对照 .code-pair/.plain-side")
         if counts["quiz"] < 1:
             errors.append(f"模块 {module_id} 缺少 details.quiz")
     for block in parser.source_blocks:
@@ -267,12 +298,14 @@ def main() -> int:
     guide_parser.add_argument("artifact")
     guide_parser.add_argument("repo")
     guide_parser.add_argument("--min-rows", type=int, default=1)
+    guide_parser.add_argument("--json", action="store_true")
 
     course_parser = subparsers.add_parser("course", help="Validate course.html")
     course_parser.add_argument("artifact")
     course_parser.add_argument("repo")
     course_parser.add_argument("--min-modules", type=int, default=4)
     course_parser.add_argument("--max-modules", type=int, default=6)
+    course_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
     artifact = existing_path(args.artifact, "交付物")
@@ -288,10 +321,33 @@ def main() -> int:
         )
 
     if errors:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "kind": args.kind,
+                        "artifact": str(artifact),
+                        "errors": errors,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 1
         for error in errors:
             print(f"[ERROR] {error}")
         print(f"Validation failed with {len(errors)} error(s).")
         return 1
+    if args.json:
+        print(
+            json.dumps(
+                {"status": "pass", "kind": args.kind, "artifact": str(artifact)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     print(f"[OK] {args.kind} artifact is valid: {artifact}")
     return 0
 
