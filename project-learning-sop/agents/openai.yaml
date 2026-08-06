@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目学习 SOP"
+  short_description: "从零带读代码库、追踪真实功能链路，并通过测试验证实际修改能力"
+  default_prompt: "Use $project-learning-sop to guide me through learning this codebase step by step."
