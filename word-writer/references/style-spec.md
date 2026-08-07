@@ -1,5 +1,7 @@
 # Word formatting specification
 
+This file defines the default profile and the rules that remain active in custom mode. A confirmed custom profile may override only heading/body font names, heading/body sizes, page-number mode and page-number size. Unspecified custom values inherit these defaults. Record any broader user-approved exception before processing.
+
 ## Typography
 
 | Role | Font | Color | Weight |
@@ -9,6 +11,8 @@
 | Page number | Microsoft YaHei / 微软雅黑 | `#000000` | Normal |
 
 Apply the font to Latin, complex-script, and East Asian font slots. Remove theme-font and theme-color overrides that could reintroduce a different appearance. Hyperlinks may remain underlined but must not remain blue or another color.
+
+Preserve source heading and body sizes by default. When custom mode supplies a heading or body size, apply that size consistently to the corresponding text runs and styles. Use 10 pt page numbers by default; a confirmed custom page-number size overrides it.
 
 ## Tables
 
@@ -43,4 +47,3 @@ Apply the font to Latin, complex-script, and East Asian font slots. Remove theme
 - Preserve paragraph text, table data, hyperlinks, bookmarks, fields, content controls, images, captions, and section order unless the user asks for content changes.
 - Treat formatting normalization as a surgical edit, not a rewrite.
 - Save a new output file by default.
-

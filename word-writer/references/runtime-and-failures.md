@@ -1,5 +1,17 @@
 # Runtime capability and failure handling
 
+## Command convention
+
+Set the working directory to the skill folder before running any command. In all examples, replace `<task-workdir>` with a writable directory belonging to the current task; do not create environments or outputs inside the installed skill.
+
+Choose one interpreter command:
+
+- Windows: `py -3`
+- macOS/Linux: `python3`
+- Host-bundled runtime: use its absolute Python path only after `scripts/check_environment.py` reports `core.status=ready`
+
+Do not switch interpreters between preflight, normalization, audit and rendering.
+
 ## Capability levels
 
 | Capability | Minimum requirement | If missing |
@@ -19,6 +31,24 @@ Run `scripts/check_environment.py` with every candidate Python interpreter. Choo
 3. If Python packages are missing, first try another already configured workspace interpreter. Install packages only with user authorization and in an isolated environment.
 4. If fonts are missing, do not silently substitute. Structural work can continue, but rendered pages are not reproducible.
 5. If conversion or rendering is missing, keep the source untouched and report the precise missing capability.
+
+Use these installation commands only after approval. They install the compatible versions declared in `scripts/requirements.txt`, not into the system interpreter.
+
+Windows:
+
+```powershell
+py -3 -m venv "<task-workdir>\.word-writer-venv"
+"<task-workdir>\.word-writer-venv\Scripts\python.exe" -m pip install -r "scripts\requirements.txt"
+```
+
+macOS/Linux:
+
+```sh
+python3 -m venv "<task-workdir>/.word-writer-venv"
+"<task-workdir>/.word-writer-venv/bin/python" -m pip install -r "scripts/requirements.txt"
+```
+
+Run the preflight again with the virtual environment's Python. Do not continue if installation fails or the report still says `core.status=blocked`.
 
 ## Failure matrix
 

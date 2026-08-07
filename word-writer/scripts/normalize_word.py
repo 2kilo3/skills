@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from docx import Document
@@ -32,6 +33,37 @@ TEXT_TAGS = {f"{W}t", f"{W}instrText", f"{W}delText"}
 HEADING_STYLE_KEYS = ("title", "subtitle", "heading", "标题")
 
 
+@dataclass(frozen=True)
+class StyleProfile:
+    heading_latin: str = HEADING_LATIN
+    heading_east_asia: str = HEADING_EAST_ASIA
+    body_latin: str = BODY_LATIN
+    body_east_asia: str = BODY_EAST_ASIA
+    heading_size_pt: float | None = None
+    body_size_pt: float | None = None
+    page_number_size_pt: float = 10.0
+
+    @property
+    def mode(self) -> str:
+        return "default" if self == StyleProfile() else "custom"
+
+    def to_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "heading_font": {
+                "latin": self.heading_latin,
+                "east_asia": self.heading_east_asia,
+            },
+            "body_font": {
+                "latin": self.body_latin,
+                "east_asia": self.body_east_asia,
+            },
+            "heading_size_pt": self.heading_size_pt or "preserve",
+            "body_size_pt": self.body_size_pt or "preserve",
+            "page_number_size_pt": self.page_number_size_pt,
+        }
+
+
 def is_heading_style(name: str | None, style_id: str | None = None) -> bool:
     value = f"{name or ''} {style_id or ''}".lower()
     return any(key in value for key in HEADING_STYLE_KEYS)
@@ -48,9 +80,32 @@ def get_or_add(parent, tag: str, *, first: bool = False):
     return child
 
 
-def set_rpr_font_and_color(rpr, *, heading: bool) -> None:
-    latin = HEADING_LATIN if heading else BODY_LATIN
-    east_asia = HEADING_EAST_ASIA if heading else BODY_EAST_ASIA
+def font_names(profile: StyleProfile, *, heading: bool) -> tuple[str, str]:
+    if heading:
+        return profile.heading_latin, profile.heading_east_asia
+    return profile.body_latin, profile.body_east_asia
+
+
+def profile_size(profile: StyleProfile, *, heading: bool) -> float | None:
+    return profile.heading_size_pt if heading else profile.body_size_pt
+
+
+def set_rpr_size(rpr, size_pt: float) -> None:
+    half_points = str(round(size_pt * 2))
+    size = get_or_add(rpr, "w:sz")
+    size.set(qn("w:val"), half_points)
+    size_cs = get_or_add(rpr, "w:szCs")
+    size_cs.set(qn("w:val"), half_points)
+
+
+def set_rpr_font_and_color(
+    rpr,
+    *,
+    heading: bool,
+    profile: StyleProfile,
+    size_pt: float | None = None,
+) -> None:
+    latin, east_asia = font_names(profile, heading=heading)
     rfonts = get_or_add(rpr, "w:rFonts", first=True)
     rfonts.set(qn("w:ascii"), latin)
     rfonts.set(qn("w:hAnsi"), latin)
@@ -64,17 +119,24 @@ def set_rpr_font_and_color(rpr, *, heading: bool) -> None:
     for attr in ("themeColor", "themeTint", "themeShade"):
         color.attrib.pop(qn(f"w:{attr}"), None)
 
+    selected_size = profile_size(profile, heading=heading) if size_pt is None else size_pt
+    if selected_size is not None:
+        set_rpr_size(rpr, selected_size)
 
-def normalize_styles(doc: Document) -> None:
+
+def normalize_styles(doc: Document, profile: StyleProfile) -> None:
     for style in doc.styles:
         if style.type not in (WD_STYLE_TYPE.PARAGRAPH, WD_STYLE_TYPE.CHARACTER):
             continue
         heading = is_heading_style(style.name, style.style_id)
-        latin = HEADING_LATIN if heading else BODY_LATIN
+        latin, _ = font_names(profile, heading=heading)
         style.font.name = latin
         style.font.color.rgb = RGBColor(0, 0, 0)
+        size_pt = profile_size(profile, heading=heading)
+        if size_pt is not None:
+            style.font.size = Pt(size_pt)
         rpr = style._element.get_or_add_rPr()
-        set_rpr_font_and_color(rpr, heading=heading)
+        set_rpr_font_and_color(rpr, heading=heading, profile=profile)
 
 
 def set_cell_margins(tc_pr) -> None:
@@ -164,7 +226,7 @@ def footer_has_page_field(story) -> bool:
     return "PAGE" in instructions.upper()
 
 
-def add_page_number(paragraph) -> None:
+def add_page_number(paragraph, profile: StyleProfile) -> None:
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.space_before = Pt(0)
     paragraph.paragraph_format.space_after = Pt(0)
@@ -172,11 +234,12 @@ def add_page_number(paragraph) -> None:
     def append_run_with(child):
         run = paragraph.add_run()
         rpr = run._element.get_or_add_rPr()
-        set_rpr_font_and_color(rpr, heading=False)
-        size = get_or_add(rpr, "w:sz")
-        size.set(qn("w:val"), "20")
-        size_cs = get_or_add(rpr, "w:szCs")
-        size_cs.set(qn("w:val"), "20")
+        set_rpr_font_and_color(
+            rpr,
+            heading=False,
+            profile=profile,
+            size_pt=profile.page_number_size_pt,
+        )
         run._element.append(child)
 
     begin = OxmlElement("w:fldChar")
@@ -201,7 +264,9 @@ def add_page_number(paragraph) -> None:
     append_run_with(end)
 
 
-def normalize_headers_and_footers(doc: Document, page_numbers: str) -> None:
+def normalize_headers_and_footers(
+    doc: Document, page_numbers: str, profile: StyleProfile
+) -> None:
     source_has_page = False
     for section in doc.sections:
         source_has_page = source_has_page or footer_has_page_field(section.footer)
@@ -254,7 +319,7 @@ def normalize_headers_and_footers(doc: Document, page_numbers: str) -> None:
     if use_page_numbers:
         for key in numbered_footers:
             if key not in first_page_footers:
-                add_page_number(footer_paragraphs[key])
+                add_page_number(footer_paragraphs[key], profile)
 
 
 def paragraph_is_heading_xml(paragraph) -> bool:
@@ -263,7 +328,7 @@ def paragraph_is_heading_xml(paragraph) -> bool:
     return is_heading_style(style_id)
 
 
-def normalize_all_wordprocessing_runs(path: Path) -> None:
+def normalize_all_wordprocessing_runs(path: Path, profile: StyleProfile) -> None:
     temp_path = path.with_name(f".{path.name}.formatting.tmp")
     with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
         temp_path, "w", zipfile.ZIP_DEFLATED
@@ -289,11 +354,22 @@ def normalize_all_wordprocessing_runs(path: Path) -> None:
                         if rpr is None:
                             rpr = etree.Element(f"{W}rPr")
                             run.insert(0, rpr)
-                        set_rpr_font_and_color(rpr, heading=heading)
+                        set_rpr_font_and_color(
+                            rpr,
+                            heading=heading,
+                            profile=profile,
+                            size_pt=(
+                                profile.page_number_size_pt
+                                if item.filename.startswith("word/footer")
+                                else None
+                            ),
+                        )
 
                 if item.filename == "word/numbering.xml":
                     for rpr in root.iter(f"{W}rPr"):
-                        set_rpr_font_and_color(rpr, heading=False)
+                        set_rpr_font_and_color(
+                            rpr, heading=False, profile=profile
+                        )
 
                 data = etree.tostring(
                     root, xml_declaration=True, encoding="UTF-8", standalone=True
@@ -448,11 +524,12 @@ def convert_word_file(source: Path, output: Path) -> None:
     )
 
 
-def style_font_matches(rfonts, *, heading: bool) -> bool:
+def style_font_matches(
+    rfonts, *, heading: bool, profile: StyleProfile
+) -> bool:
     if rfonts is None:
         return False
-    latin = HEADING_LATIN if heading else BODY_LATIN
-    east_asia = HEADING_EAST_ASIA if heading else BODY_EAST_ASIA
+    latin, east_asia = font_names(profile, heading=heading)
     return (
         rfonts.get(f"{W}ascii") == latin
         and rfonts.get(f"{W}hAnsi") == latin
@@ -461,7 +538,23 @@ def style_font_matches(rfonts, *, heading: bool) -> bool:
     )
 
 
-def audit_docx(path: Path) -> dict:
+def style_size_matches(rpr, size_pt: float | None) -> bool:
+    if size_pt is None:
+        return True
+    if rpr is None:
+        return False
+    expected = str(round(size_pt * 2))
+    size = rpr.find(f"{W}sz")
+    size_cs = rpr.find(f"{W}szCs")
+    return (
+        size is not None
+        and size_cs is not None
+        and size.get(f"{W}val") == expected
+        and size_cs.get(f"{W}val") == expected
+    )
+
+
+def audit_docx(path: Path, profile: StyleProfile) -> dict:
     issues: list[str] = []
     counts = {
         "text_runs": 0,
@@ -496,9 +589,21 @@ def audit_docx(path: Path) -> dict:
                     rfonts = rpr.find(f"{W}rFonts") if rpr is not None else None
                     if color is None or color.get(f"{W}val") != BLACK:
                         issues.append(f"{name}: text run without explicit black color")
-                    if not style_font_matches(rfonts, heading=heading):
+                    if not style_font_matches(
+                        rfonts, heading=heading, profile=profile
+                    ):
                         role = "heading" if heading else "body"
                         issues.append(f"{name}: {role} run has a nonstandard font")
+                    expected_size = (
+                        profile.page_number_size_pt
+                        if name.startswith("word/footer")
+                        else profile_size(profile, heading=heading)
+                    )
+                    if not style_size_matches(rpr, expected_size):
+                        role = "page-number" if name.startswith("word/footer") else (
+                            "heading" if heading else "body"
+                        )
+                        issues.append(f"{name}: {role} run has a nonstandard size")
 
         document_root = parsed.get("word/document.xml")
         if document_root is not None:
@@ -593,23 +698,34 @@ def audit_docx(path: Path) -> dict:
     return {
         "file": str(path.resolve()),
         "status": "pass" if not unique_issues else "fail",
+        "style_profile": profile.to_dict(),
         "counts": counts,
         "issues": unique_issues,
     }
 
 
-def normalize_docx(source: Path, output: Path, page_numbers: str) -> dict:
+def normalize_docx(
+    source: Path,
+    output: Path,
+    page_numbers: str,
+    profile: StyleProfile,
+) -> dict:
     doc = Document(source)
-    normalize_styles(doc)
+    normalize_styles(doc, profile)
     normalize_tables(doc)
-    normalize_headers_and_footers(doc, page_numbers)
+    normalize_headers_and_footers(doc, page_numbers, profile)
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output)
-    normalize_all_wordprocessing_runs(output)
-    return audit_docx(output)
+    normalize_all_wordprocessing_runs(output, profile)
+    return audit_docx(output, profile)
 
 
-def run_normalization(source: Path, output: Path, page_numbers: str) -> dict:
+def run_normalization(
+    source: Path,
+    output: Path,
+    page_numbers: str,
+    profile: StyleProfile,
+) -> dict:
     source_suffix = source.suffix.lower()
     output_suffix = output.suffix.lower()
     if source_suffix not in (".doc", ".docx"):
@@ -627,17 +743,50 @@ def run_normalization(source: Path, output: Path, page_numbers: str) -> dict:
             convert_word_file(source, working_source)
 
         if output_suffix == ".docx":
-            report = normalize_docx(working_source, output, page_numbers)
+            report = normalize_docx(working_source, output, page_numbers, profile)
         else:
             normalized_docx = temp_root / f"{output.stem}.normalized.docx"
-            report = normalize_docx(working_source, normalized_docx, page_numbers)
+            report = normalize_docx(
+                working_source, normalized_docx, page_numbers, profile
+            )
             convert_word_file(normalized_docx, output)
             roundtrip_docx = temp_root / f"{output.stem}.roundtrip.docx"
             convert_word_file(output, roundtrip_docx)
-            report = audit_docx(roundtrip_docx)
+            report = audit_docx(roundtrip_docx, profile)
             report["file"] = str(output.resolve())
             report["note"] = "Audit performed after DOC -> DOCX round-trip."
     return report
+
+
+def point_size(value: str) -> float:
+    size = float(value)
+    if size < 1 or size > 200:
+        raise argparse.ArgumentTypeError("size must be between 1 and 200 points")
+    return size
+
+
+def font_name(value: str) -> str:
+    name = value.strip()
+    if not name:
+        raise argparse.ArgumentTypeError("font name cannot be empty")
+    return name
+
+
+def build_style_profile(args: argparse.Namespace) -> StyleProfile:
+    default = StyleProfile()
+    heading_latin = args.heading_font or default.heading_latin
+    heading_east_asia = args.heading_font or default.heading_east_asia
+    body_latin = args.body_font or default.body_latin
+    body_east_asia = args.body_font or default.body_east_asia
+    return StyleProfile(
+        heading_latin=heading_latin,
+        heading_east_asia=heading_east_asia,
+        body_latin=body_latin,
+        body_east_asia=body_east_asia,
+        heading_size_pt=args.heading_size,
+        body_size_pt=args.body_size,
+        page_number_size_pt=args.page_number_size,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -650,6 +799,32 @@ def parse_args() -> argparse.Namespace:
         "--page-numbers",
         choices=("preserve", "always", "none"),
         default="preserve",
+    )
+    parser.add_argument(
+        "--heading-font",
+        type=font_name,
+        help="set one font name for all heading text slots",
+    )
+    parser.add_argument(
+        "--body-font",
+        type=font_name,
+        help="set one font name for all body text slots",
+    )
+    parser.add_argument(
+        "--heading-size",
+        type=point_size,
+        help="set one heading size in points; omit to preserve existing sizes",
+    )
+    parser.add_argument(
+        "--body-size",
+        type=point_size,
+        help="set one body size in points; omit to preserve existing sizes",
+    )
+    parser.add_argument(
+        "--page-number-size",
+        type=point_size,
+        default=10.0,
+        help="set page-number size in points (default: 10)",
     )
     parser.add_argument(
         "--audit-only",
@@ -666,10 +841,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    profile = build_style_profile(args)
     if args.audit_only:
         if args.input.suffix.lower() != ".docx":
             raise ValueError("--audit-only currently requires a .docx file")
-        report = audit_docx(args.input)
+        report = audit_docx(args.input, profile)
     else:
         if args.output is None:
             raise ValueError("--output is required unless --audit-only is used")
@@ -679,7 +855,9 @@ def main() -> int:
             raise FileExistsError(
                 f"output already exists: {args.output}; use a new path or pass --force"
             )
-        report = run_normalization(args.input, args.output, args.page_numbers)
+        report = run_normalization(
+            args.input, args.output, args.page_numbers, profile
+        )
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["status"] == "pass" else 1

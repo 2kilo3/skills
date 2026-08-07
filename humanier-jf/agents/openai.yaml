@@ -1,0 +1,6 @@
+interface:
+  display_name: "Humanier-JF 中文人工审校"
+  short_description: "手动审校中文文本，减少 AI 写作痕迹并保持原意与语气"
+  default_prompt: "使用 $humanier-jf 审校以下中文文本，保留原意、事实和语气。"
+policy:
+  allow_implicit_invocation: false

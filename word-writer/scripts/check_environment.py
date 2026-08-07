@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import importlib.util
+from importlib import metadata
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +17,24 @@ try:
     import winreg
 except ImportError:  # pragma: no cover - non-Windows
     winreg = None
+
+
+REQUIRED_PACKAGES = {
+    "python-docx": ("docx", (1, 2, 0), 2),
+    "lxml": ("lxml", (5, 0, 0), 7),
+}
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    numbers = re.findall(r"\d+", value)
+    return tuple(int(number) for number in numbers[:3])
+
+
+def version_supported(value: str | None, minimum: tuple[int, ...], maximum_major: int) -> bool:
+    if value is None:
+        return False
+    parsed = version_tuple(value)
+    return bool(parsed) and parsed >= minimum and parsed[0] < maximum_major
 
 
 def find_soffice() -> str | None:
@@ -69,12 +89,24 @@ def detect_fonts() -> dict[str, bool | None]:
 def main() -> int:
     packages = {
         name: importlib.util.find_spec(module) is not None
-        for name, module in {"python-docx": "docx", "lxml": "lxml"}.items()
+        for name, (module, _, _) in REQUIRED_PACKAGES.items()
+    }
+    versions = {
+        name: metadata.version(name) if packages[name] else None
+        for name in REQUIRED_PACKAGES
+    }
+    versions_match = {
+        name: version_supported(versions[name], minimum, maximum_major)
+        for name, (_, minimum, maximum_major) in REQUIRED_PACKAGES.items()
     }
     fonts = detect_fonts()
     soffice = find_soffice()
     word = has_word_com()
-    core_ready = sys.version_info >= (3, 10) and all(packages.values())
+    core_ready = (
+        sys.version_info >= (3, 10)
+        and all(packages.values())
+        and all(versions_match.values())
+    )
     render_ready = bool(soffice or word)
     fonts_ready = all(value is True for value in fonts.values())
     status = "ready" if core_ready and render_ready and fonts_ready else "degraded"
@@ -86,7 +118,22 @@ def main() -> int:
         actions.append("Use Python 3.10 or newer.")
     missing = [name for name, available in packages.items() if not available]
     if missing:
-        actions.append("Select a Python environment containing: " + ", ".join(missing))
+        actions.append(
+            "Select another Python environment or, after approval, create an isolated "
+            "environment and install scripts/requirements.txt. Missing: "
+            + ", ".join(missing)
+        )
+    mismatched = [
+        f"{name}={versions[name]} (supported >= {minimum} and < {maximum_major}.0.0)"
+        for name, (_, minimum, maximum_major) in REQUIRED_PACKAGES.items()
+        if packages[name] and not versions_match[name]
+    ]
+    if mismatched:
+        actions.append(
+            "Use compatible versions from scripts/requirements.txt in an isolated "
+            "environment. Version mismatch: "
+            + ", ".join(mismatched)
+        )
     if not fonts_ready:
         actions.append("Install SimHei and Microsoft YaHei, or obtain approval for substitutes.")
     if not render_ready:
@@ -94,7 +141,12 @@ def main() -> int:
 
     report = {
         "status": status,
-        "core": {"status": "ready" if core_ready else "blocked", "packages": packages},
+        "core": {
+            "status": "ready" if core_ready else "blocked",
+            "packages": packages,
+            "versions": versions,
+            "versions_match": versions_match,
+        },
         "python": {
             "executable": sys.executable,
             "version": sys.version.split()[0],
