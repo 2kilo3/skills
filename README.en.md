@@ -80,6 +80,6 @@ See [`SECURITY-AUDIT.md`](SECURITY-AUDIT.md) for the review scope, resolved find
 
 ## License
 
-There is currently no repository-wide license file. Unless a file states otherwise, public visibility alone does not grant permission to copy, modify, or redistribute the material.
+This repository is open source under the [MIT License](LICENSE).
 
-`humanier-jf` contains material adapted from an MIT-licensed project. Its upstream copyright and license notice are preserved in [`humanier-jf/references/source-and-license.md`](humanier-jf/references/source-and-license.md). That upstream notice does not automatically license the rest of this repository under MIT.
+`humanier-jf` contains material adapted from other MIT-licensed work. Its upstream copyright and license notice are preserved in [`humanier-jf/references/source-and-license.md`](humanier-jf/references/source-and-license.md). Redistributions should retain both the repository license and that upstream notice.

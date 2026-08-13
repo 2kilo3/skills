@@ -80,6 +80,6 @@ python -X utf8 write-literature-notes/scripts/audit_skill_security.py
 
 ## 许可
 
-仓库根目录目前没有统一许可证。除非相应文件另有明确说明，公开可见不代表授予复制、修改或再发布权。
+本仓库以 [MIT License](LICENSE) 开源。
 
-`humanier-jf` 含有基于 MIT 项目改编的内容，原版权与许可文本保存在 [`humanier-jf/references/source-and-license.md`](humanier-jf/references/source-and-license.md)。该上游许可说明不等于为仓库其余内容自动授予 MIT 许可。
+`humanier-jf` 含有基于其他 MIT 项目改编的内容，原版权与许可文本保存在 [`humanier-jf/references/source-and-license.md`](humanier-jf/references/source-and-license.md)。再发布时应同时保留仓库许可证和该上游声明。

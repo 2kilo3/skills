@@ -4,7 +4,7 @@ Last reviewed: 2026-08-13
 
 ## Scope
 
-This review covered all four skill directories, their scripts and bundled assets, the current worktree, and all five reachable Git commits. The Office review inspected 15 historical DOCX versions, including ZIP paths, relationships, active content, embedded objects, author properties, email addresses, and machine-specific paths.
+This review covered all four skill directories, their scripts and bundled assets, the current worktree, and all seven reachable Git commits. The Office review inspected 21 reachable DOCX versions, including ZIP paths, relationships, active content, embedded objects, author properties, email addresses, and machine-specific paths.
 
 The review combined manual data-flow and subprocess inspection with repository secret scans, Office archive scans, regression tests, environment checks, real DOCX generation and normalization, Microsoft Word PDF rendering, and visual inspection of the rendered pages.
 
@@ -28,11 +28,11 @@ The review combined manual data-flow and subprocess inspection with repository s
 - Skill structure: all four skills passed the official OpenAI skill validator.
 - Bundled security audits: all three scripted skill audits returned `status: pass`, including 35 inspected Office text members.
 - Environment checks: project learning, Word Writer, and literature-note workflows reported ready in the review environment.
-- Office history scan: 15 DOCX versions inspected, with no remaining finding.
+- Office history scan: 21 reachable DOCX versions inspected, with no remaining finding.
 - End-to-end document checks: the locked literature template generated a valid 13-row note; Word Writer preserved paragraph, table, section, and image counts; the source rendered to one A4 page and the normalized copy to two A4 pages in Microsoft Word. Both passed visual inspection.
 
 ## Residual boundaries
 
 No unresolved issue is known within the reviewed tree and history. This is not a proof that unknown vulnerabilities do not exist. Microsoft Word, LibreOffice, Python, Git, and installed dependencies remain trusted components. Real papers, documents, repositories, and generated outputs may contain private material even when the skill code is clean; review those inputs and outputs under their own disclosure rules.
 
-Repository publication also requires an explicit repository-wide license. Public visibility alone does not grant open-source rights.
+The repository is licensed under the MIT License. The separate upstream MIT notice retained for `humanier-jf` must remain with redistributions.
