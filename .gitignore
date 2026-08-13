@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+.venv/
+.word-writer-venv/
+
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+verification/
+*.rendered.pdf
+*-page-*.png

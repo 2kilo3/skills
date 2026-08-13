@@ -29,7 +29,7 @@ REQUIRED_FIELDS = (
     "reflection",
 )
 
-EXPECTED_TEMPLATE_SHA256 = "4824159895BDA6297DEF7DEFDCE79CD406D88BE40C6D9ED4AA9ABBEF680A387C"
+EXPECTED_TEMPLATE_SHA256 = "B2E31C1B2CF8870810F596E725F48088DB2DDFBC7E629CC60262BB8A75A5F932"
 NUMBER_PREFIX_RE = re.compile(r"^\s*\d+\s*[.．、]\s*")
 LABEL_PREFIX_RE = re.compile(r"^[^，。；！？,.!?;：:\n]{1,20}[：:]")
 STRUCTURE_TOP_RE = re.compile(
@@ -386,6 +386,13 @@ def build(
     *,
     force: bool = False,
 ) -> dict[str, Any]:
+    if output.suffix.lower() != ".docx":
+        raise ValueError("output path must end with .docx")
+    output = assert_safe_output_path(output)
+    if output.exists() and not force:
+        raise FileExistsError(
+            f"output already exists: {output}; use a new path or pass --force"
+        )
     content = load_content(content_path)
     structure = normalize_structure(content["structure"])
     research_question = normalize_numbered_points(
@@ -399,12 +406,6 @@ def build(
     if limitations:
         innovation_lines.extend(["不足：", *limitations])
 
-    if output.suffix.lower() != ".docx":
-        raise ValueError("output path must end with .docx")
-    if output.exists() and not force:
-        raise FileExistsError(
-            f"output already exists: {output}; use a new path or pass --force"
-        )
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(template, output)
 
@@ -449,6 +450,15 @@ def build(
     return report
 
 
+def assert_safe_output_path(path: Path) -> Path:
+    output = path.absolute()
+    for component in (output, *output.parents):
+        is_junction = getattr(component, "is_junction", lambda: False)
+        if component.is_symlink() or is_junction():
+            raise ValueError("output path must not contain a symbolic link or junction")
+    return output
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fill the retained literature-reading-note DOCX template.")
     parser.add_argument("--content", required=True, type=Path, help="UTF-8 JSON content file")
@@ -462,12 +472,13 @@ def main() -> int:
 
     skill_dir = Path(__file__).resolve().parents[1]
     template = resolve_template(skill_dir)
-    if template.resolve() == args.out.resolve():
+    output = assert_safe_output_path(args.out)
+    if template.resolve() == output:
         raise ValueError("output path must differ from template path")
     report = build(
         template.resolve(),
         args.content.resolve(),
-        args.out.resolve(),
+        output,
         force=args.force,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))

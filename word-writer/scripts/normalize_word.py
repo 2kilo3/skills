@@ -9,7 +9,8 @@ import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
@@ -31,6 +32,16 @@ BODY_LATIN = "Microsoft YaHei"
 BODY_EAST_ASIA = "微软雅黑"
 TEXT_TAGS = {f"{W}t", f"{W}instrText", f"{W}delText"}
 HEADING_STYLE_KEYS = ("title", "subtitle", "heading", "标题")
+HYPERLINK_RELATIONSHIP = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+)
+FORBIDDEN_OFFICE_PARTS = ("vbaproject.bin", "/activex/", "/embeddings/")
+MAX_DOCX_MEMBERS = 10_000
+MAX_DOCX_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_DOCX_TOTAL_BYTES = 500 * 1024 * 1024
+MAX_DOCX_COMPRESSION_RATIO = 200
+MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
+ALLOWED_HYPERLINK_SCHEMES = {"http", "https", "mailto"}
 
 
 @dataclass(frozen=True)
@@ -329,53 +340,59 @@ def paragraph_is_heading_xml(paragraph) -> bool:
 
 
 def normalize_all_wordprocessing_runs(path: Path, profile: StyleProfile) -> None:
-    temp_path = path.with_name(f".{path.name}.formatting.tmp")
-    with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
-        temp_path, "w", zipfile.ZIP_DEFLATED
-    ) as target:
-        for item in source.infolist():
-            data = source.read(item.filename)
-            if item.filename.startswith("word/") and item.filename.endswith(".xml"):
-                try:
-                    root = etree.fromstring(data)
-                except etree.XMLSyntaxError:
-                    target.writestr(item, data)
-                    continue
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.name}.", suffix=".formatting.tmp", dir=path.parent, delete=False
+    ) as handle:
+        temp_path = Path(handle.name)
+    try:
+        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
+            temp_path, "w", zipfile.ZIP_DEFLATED
+        ) as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename.startswith("word/") and item.filename.endswith(".xml"):
+                    try:
+                        root = etree.fromstring(data)
+                    except etree.XMLSyntaxError:
+                        target.writestr(item, data)
+                        continue
 
-                for table in root.iter(f"{W}tbl"):
-                    normalize_table_xml(table)
+                    for table in root.iter(f"{W}tbl"):
+                        normalize_table_xml(table)
 
-                for paragraph in root.iter(f"{W}p"):
-                    heading = paragraph_is_heading_xml(paragraph)
-                    for run in paragraph.iter(f"{W}r"):
-                        if not any(child.tag in TEXT_TAGS for child in run):
-                            continue
-                        rpr = run.find(f"{W}rPr")
-                        if rpr is None:
-                            rpr = etree.Element(f"{W}rPr")
-                            run.insert(0, rpr)
-                        set_rpr_font_and_color(
-                            rpr,
-                            heading=heading,
-                            profile=profile,
-                            size_pt=(
-                                profile.page_number_size_pt
-                                if item.filename.startswith("word/footer")
-                                else None
-                            ),
-                        )
+                    for paragraph in root.iter(f"{W}p"):
+                        heading = paragraph_is_heading_xml(paragraph)
+                        for run in paragraph.iter(f"{W}r"):
+                            if not any(child.tag in TEXT_TAGS for child in run):
+                                continue
+                            rpr = run.find(f"{W}rPr")
+                            if rpr is None:
+                                rpr = etree.Element(f"{W}rPr")
+                                run.insert(0, rpr)
+                            set_rpr_font_and_color(
+                                rpr,
+                                heading=heading,
+                                profile=profile,
+                                size_pt=(
+                                    profile.page_number_size_pt
+                                    if item.filename.startswith("word/footer")
+                                    else None
+                                ),
+                            )
 
-                if item.filename == "word/numbering.xml":
-                    for rpr in root.iter(f"{W}rPr"):
-                        set_rpr_font_and_color(
-                            rpr, heading=False, profile=profile
-                        )
+                    if item.filename == "word/numbering.xml":
+                        for rpr in root.iter(f"{W}rPr"):
+                            set_rpr_font_and_color(
+                                rpr, heading=False, profile=profile
+                            )
 
-                data = etree.tostring(
-                    root, xml_declaration=True, encoding="UTF-8", standalone=True
-                )
-            target.writestr(item, data)
-    os.replace(temp_path, path)
+                    data = etree.tostring(
+                        root, xml_declaration=True, encoding="UTF-8", standalone=True
+                    )
+                target.writestr(item, data)
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def find_soffice() -> str | None:
@@ -389,6 +406,85 @@ def find_soffice() -> str | None:
         Path("/usr/bin/soffice"),
     ]
     return str(next((path for path in candidates if path.exists()), "")) or None
+
+
+def assert_safe_docx_for_automation(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            if len(members) > MAX_DOCX_MEMBERS:
+                raise ValueError("input contains too many DOCX archive members")
+            if len(names) != len(set(names)):
+                raise ValueError("input contains duplicate DOCX archive members")
+            if sum(member.file_size for member in members) > MAX_DOCX_TOTAL_BYTES:
+                raise ValueError("input DOCX uncompressed size exceeds the safety limit")
+
+            for member in members:
+                member_path = PurePosixPath(member.filename.replace("\\", "/"))
+                if (
+                    member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or (member_path.parts and member_path.parts[0].endswith(":"))
+                ):
+                    raise ValueError("input contains an unsafe DOCX archive path")
+                if member.flag_bits & 0x1:
+                    raise ValueError("input contains an encrypted DOCX archive member")
+                if member.file_size > MAX_DOCX_MEMBER_BYTES or (
+                    member.compress_size
+                    and member.file_size / member.compress_size
+                    > MAX_DOCX_COMPRESSION_RATIO
+                ):
+                    raise ValueError("input DOCX archive member exceeds a safety limit")
+                if member.filename.lower().endswith((".xml", ".rels")):
+                    if member.file_size > MAX_DOCX_XML_BYTES:
+                        raise ValueError("input DOCX XML exceeds the safety limit")
+                    xml = archive.read(member)
+                    lowered_xml = xml.lower()
+                    if b"<!doctype" in lowered_xml or b"<!entity" in lowered_xml:
+                        raise ValueError("input DOCX XML contains a DTD or entity declaration")
+                lowered = f"/{member.filename.lower()}"
+                if (
+                    any(part in lowered for part in FORBIDDEN_OFFICE_PARTS)
+                    or "oleobject" in lowered
+                ):
+                    raise ValueError(
+                        "input contains active or embedded Office content that this workflow does not open"
+                    )
+                if member.filename.lower().endswith(".rels"):
+                    try:
+                        root = etree.fromstring(
+                            xml,
+                            parser=etree.XMLParser(
+                                load_dtd=False,
+                                no_network=True,
+                                resolve_entities=False,
+                                huge_tree=False,
+                            ),
+                        )
+                    except etree.XMLSyntaxError as exc:
+                        raise ValueError("input contains invalid Office relationship XML") from exc
+                    for relationship in root:
+                        if relationship.get("TargetMode", "").lower() != "external":
+                            continue
+                        if relationship.get("Type") != HYPERLINK_RELATIONSHIP:
+                            raise ValueError(
+                                "input contains a non-hyperlink external Office relationship"
+                            )
+                        target = relationship.get("Target", "")
+                        if urlsplit(target).scheme.lower() not in ALLOWED_HYPERLINK_SCHEMES:
+                            raise ValueError("input contains an unsafe Office hyperlink")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("input is not a valid DOCX archive") from exc
+
+
+def assert_safe_output_path(path: Path) -> Path:
+    output = path.absolute()
+    for component in (output, *output.parents):
+        is_junction = getattr(component, "is_junction", lambda: False)
+        if component.is_symlink() or is_junction():
+            raise ValueError("output path must not contain a symbolic link or junction")
+    return output
 
 
 def convert_with_soffice(source: Path, output: Path) -> bool:
@@ -438,6 +534,8 @@ def convert_with_word_com(source: Path, output: Path) -> bool:
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
+        word.AutomationSecurity = 3
+        word.Options.UpdateLinksAtOpen = False
         document = word.Documents.Open(
             str(source.resolve()), ReadOnly=True, AddToRecentFiles=False
         )
@@ -469,6 +567,8 @@ try {
     $word = New-Object -ComObject Word.Application
     $word.Visible = $false
     $word.DisplayAlerts = 0
+    $word.AutomationSecurity = 3
+    $word.Options.UpdateLinksAtOpen = $false
     $document = $word.Documents.Open($SourcePath, $false, $true, $false)
     $document.SaveAs2($OutputPath, $FileFormat)
     if (-not (Test-Path -LiteralPath $OutputPath)) { exit 1 }
@@ -512,15 +612,17 @@ finally {
 
 
 def convert_word_file(source: Path, output: Path) -> None:
-    if convert_with_soffice(source, output):
-        return
+    if source.suffix.lower() == ".docx":
+        assert_safe_docx_for_automation(source)
     if convert_with_word_com(source, output):
         return
     if convert_with_word_powershell(source, output):
         return
+    if source.suffix.lower() == ".docx" and convert_with_soffice(source, output):
+        return
     raise RuntimeError(
-        "Legacy .doc conversion requires LibreOffice/soffice or Microsoft Word. "
-        "Convert the file to .docx manually, then retry."
+        "Legacy .doc conversion requires Microsoft Word with forced macro security. "
+        "Convert the file to .docx in a trusted environment, then retry."
     )
 
 
@@ -555,6 +657,7 @@ def style_size_matches(rpr, size_pt: float | None) -> bool:
 
 
 def audit_docx(path: Path, profile: StyleProfile) -> dict:
+    assert_safe_docx_for_automation(path)
     issues: list[str] = []
     counts = {
         "text_runs": 0,
@@ -710,6 +813,7 @@ def normalize_docx(
     page_numbers: str,
     profile: StyleProfile,
 ) -> dict:
+    assert_safe_docx_for_automation(source)
     doc = Document(source)
     normalize_styles(doc, profile)
     normalize_tables(doc)
@@ -734,6 +838,7 @@ def run_normalization(
         raise ValueError("Output must be a .doc or .docx file")
     if not source.exists():
         raise FileNotFoundError(source)
+    output = assert_safe_output_path(output)
 
     with tempfile.TemporaryDirectory(prefix="word_writer_") as temp_dir:
         temp_root = Path(temp_dir)
@@ -849,14 +954,15 @@ def main() -> int:
     else:
         if args.output is None:
             raise ValueError("--output is required unless --audit-only is used")
-        if args.input.resolve() == args.output.resolve():
+        output = assert_safe_output_path(args.output)
+        if args.input.resolve() == output:
             raise ValueError("input and output paths must differ; normalize a copy")
-        if args.output.exists() and not args.force:
+        if output.exists() and not args.force:
             raise FileExistsError(
-                f"output already exists: {args.output}; use a new path or pass --force"
+                f"output already exists: {output}; use a new path or pass --force"
             )
         report = run_normalization(
-            args.input, args.output, args.page_numbers, profile
+            args.input, output, args.page_numbers, profile
         )
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

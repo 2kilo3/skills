@@ -6,6 +6,11 @@
 
 - 文件名：`course.html`，与 `guide.md` 同目录（`notes/`）。
 - 单文件包含 `<style>` 与 `<script>`，不引用外部资源；图标用 Unicode/emoji，字体只用系统字体栈，保证断网可用。
+- `<head>` 必须包含下列 CSP；不得使用 `base`、`embed`、`form`、`iframe`、`object` 或 `meta refresh`。网络请求、表单提交、外部基址和嵌入对象都保持关闭：
+
+```html
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; img-src data:; object-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+```
 - 页面上方固定导航条（模块按钮 + 当前进度），主体为滚动模块（`scroll-snap-type: y proximity`，`min-height: 100dvh` 带 `100vh` 回退）。
 
 ## 2. 教学弧线（模块设计：4-6 个模块）
@@ -42,7 +47,7 @@
 - 能做成图/动画/交互的，**绝不用段落**。
 - 每屏回答"**why should I care?**"（这对学习者有什么用：更会指挥 AI / 更会调试 / 更会做决策），再讲"how"。
 - **原始代码原则**：所有代码摘录从真实代码库**原样复制**，标注文件路径；禁止改写、简化、编造。学习者应能在源码中找到同一段。
-- 每个真实代码块使用 `<pre data-source="仓库相对路径" data-lines="起始行-结束行"><code>...</code></pre>`；`code` 内不加语法高亮标签，保证校验器能逐字匹配源码。
+- 每个真实代码块使用 `<pre data-source="仓库相对路径" data-lines="起始行-结束行"><code>...</code></pre>`；写入 HTML 时必须转义 `&`、`<`、`>`，`code` 内不加语法高亮标签。解析后的文本必须与源码逐字匹配。
 - 语言大白话，默认零背景；术语必解释。
 
 ## 5. 设计系统（视觉规范）

@@ -104,6 +104,7 @@ python -X utf8 scripts/audit_skill_security.py
 - `references/template-spec.md`：模板布局与保真门槛。
 - `assets/reading-note-template.docx`：唯一生成模板。
 - `scripts/check_environment.py`：新电脑预检。
+- `scripts/requirements.txt`：隔离环境使用的兼容 Python 依赖范围。
 - `scripts/fill_reading_note.py`：确定性填表与审计。
 - `scripts/render_docx.py`：LibreOffice/Word PDF 渲染入口。
 - `scripts/audit_skill_security.py`：不回显秘密值的凭据、私有路径与 OOXML 内容扫描。

@@ -10,7 +10,88 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
+
+
+HYPERLINK_RELATIONSHIP = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+)
+FORBIDDEN_OFFICE_PARTS = ("vbaproject.bin", "/activex/", "/embeddings/")
+MAX_DOCX_MEMBERS = 10_000
+MAX_DOCX_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_DOCX_TOTAL_BYTES = 500 * 1024 * 1024
+MAX_DOCX_COMPRESSION_RATIO = 200
+MAX_DOCX_XML_BYTES = 20 * 1024 * 1024
+ALLOWED_HYPERLINK_SCHEMES = {"http", "https", "mailto"}
+
+
+def assert_safe_docx_for_automation(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            if len(members) > MAX_DOCX_MEMBERS:
+                raise ValueError("input contains too many DOCX archive members")
+            if len(names) != len(set(names)):
+                raise ValueError("input contains duplicate DOCX archive members")
+            if sum(member.file_size for member in members) > MAX_DOCX_TOTAL_BYTES:
+                raise ValueError("input DOCX uncompressed size exceeds the safety limit")
+
+            for member in members:
+                member_path = PurePosixPath(member.filename.replace("\\", "/"))
+                if (
+                    member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or (member_path.parts and member_path.parts[0].endswith(":"))
+                ):
+                    raise ValueError("input contains an unsafe DOCX archive path")
+                if member.flag_bits & 0x1:
+                    raise ValueError("input contains an encrypted DOCX archive member")
+                if member.file_size > MAX_DOCX_MEMBER_BYTES or (
+                    member.compress_size
+                    and member.file_size / member.compress_size
+                    > MAX_DOCX_COMPRESSION_RATIO
+                ):
+                    raise ValueError("input DOCX archive member exceeds a safety limit")
+                if member.filename.lower().endswith((".xml", ".rels")):
+                    if member.file_size > MAX_DOCX_XML_BYTES:
+                        raise ValueError("input DOCX XML exceeds the safety limit")
+                    xml = archive.read(member)
+                    lowered_xml = xml.lower()
+                    if b"<!doctype" in lowered_xml or b"<!entity" in lowered_xml:
+                        raise ValueError("input DOCX XML contains a DTD or entity declaration")
+                lowered = f"/{member.filename.lower()}"
+                if (
+                    any(part in lowered for part in FORBIDDEN_OFFICE_PARTS)
+                    or "oleobject" in lowered
+                ):
+                    raise ValueError("input contains active or embedded Office content")
+                if member.filename.lower().endswith(".rels"):
+                    root = ElementTree.fromstring(xml)
+                    for relationship in root:
+                        if relationship.attrib.get("TargetMode", "").lower() != "external":
+                            continue
+                        if relationship.attrib.get("Type") != HYPERLINK_RELATIONSHIP:
+                            raise ValueError(
+                                "input contains a non-hyperlink external Office relationship"
+                            )
+                        target = relationship.attrib.get("Target", "")
+                        if urlsplit(target).scheme.lower() not in ALLOWED_HYPERLINK_SCHEMES:
+                            raise ValueError("input contains an unsafe Office hyperlink")
+    except (zipfile.BadZipFile, ElementTree.ParseError) as exc:
+        raise ValueError("input is not a valid DOCX archive") from exc
+
+
+def assert_safe_output_path(path: Path) -> Path:
+    output = path.absolute()
+    for component in (output, *output.parents):
+        is_junction = getattr(component, "is_junction", lambda: False)
+        if component.is_symlink() or is_junction():
+            raise ValueError("output path must not contain a symbolic link or junction")
+    return output
 
 
 def find_soffice() -> str | None:
@@ -69,6 +150,8 @@ try {
     $word = New-Object -ComObject Word.Application
     $word.Visible = $false
     $word.DisplayAlerts = 0
+    $word.AutomationSecurity = 3
+    $word.Options.UpdateLinksAtOpen = $false
     $document = $word.Documents.Open($SourcePath, $false, $true, $false)
     $document.ExportAsFixedFormat($OutputPath, 17)
     if (-not (Test-Path -LiteralPath $OutputPath)) { exit 1 }
@@ -117,9 +200,10 @@ def main() -> int:
     args = parser.parse_args()
 
     source = args.input.resolve()
-    output = args.pdf.resolve()
+    output = assert_safe_output_path(args.pdf)
     if source.suffix.lower() != ".docx" or not source.is_file():
         raise ValueError("input must be an existing .docx file")
+    assert_safe_docx_for_automation(source)
     if output.suffix.lower() != ".pdf":
         raise ValueError("--pdf must end with .pdf")
     if output.exists() and not args.force:

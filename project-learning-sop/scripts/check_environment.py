@@ -31,7 +31,7 @@ FILE_COUNT_LIMIT = 50_000
 
 def run_git(git: str, repo: Path, *arguments: str) -> str | None:
     completed = subprocess.run(
-        [git, "-C", str(repo), *arguments],
+        [git, "-c", "core.fsmonitor=false", "-C", str(repo), *arguments],
         capture_output=True,
         text=True,
         timeout=10,

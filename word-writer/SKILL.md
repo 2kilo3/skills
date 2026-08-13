@@ -52,7 +52,7 @@ Before editing, inventory paragraph text, table count and dimensions, images, hy
 ### 2. Author or edit
 
 - **Existing `.docx`**: make requested content edits in a new working copy, then normalize it.
-- **Legacy `.doc`**: let the normalizer convert through LibreOffice or Microsoft Word. If neither is available, stop and request a `.docx` source or an installed converter.
+- **Legacy `.doc`**: convert only through Microsoft Word with forced macro security. If Word is unavailable, request a `.docx` source created in a trusted environment; the workflow does not pass opaque `.doc` files to LibreOffice automation.
 - **New document**: create real Word paragraph styles, real tables and real list numbering. Draft at readable sizes, then use the normalizer as the enforcement pass.
 - **In-place request**: still generate and validate a sibling temporary output first. Preserve a recoverable backup before replacing the original.
 

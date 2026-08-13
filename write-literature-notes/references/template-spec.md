@@ -3,12 +3,12 @@
 ## 权威文件与复制规则
 
 - Skill 唯一模板：`assets/reading-note-template.docx`
-- 模板 SHA-256：`4824159895BDA6297DEF7DEFDCE79CD406D88BE40C6D9ED4AA9ABBEF680A387C`
+- 模板 SHA-256：`B2E31C1B2CF8870810F596E725F48088DB2DDFBC7E629CC60262BB8A75A5F932`
 - 该资产是用户指定原模板的锁定副本；运行时不依赖任何外部绝对路径。
 - 老师参考稿：`assets/teacher-reference.docx`
-- 老师参考稿 SHA-256：`55193C302629F43710772B41191EB83FDCEE2DE0F8A22C13D217297D8939A5BE`
+- 老师参考稿 SHA-256：`FAED7BA4511380925BE4AD27E4EFDAF6AE3DC235AB20EB4984586C4CB91371AB`
 - 近期风格参考：`assets/recent-style-reference.docx`
-- 近期风格参考 SHA-256：`8B299A53899E773E48DC92170E603659FE5E4EE2EC6FB30137B166A151FCEB5F`
+- 近期风格参考 SHA-256：`B4A39E8393BF5FE81EBBAC1B80DCDC934F957688613E4E25750A94BFFBB67AF3`
 
 正式生成时先复制 `assets/reading-note-template.docx` 到新的输出路径，再只修改副本中的文本槽位。所有笔记内容都写入原表格，不在表格外新增正文；不得直接修改模板资产，不得从空白文档重建表格，也不得换用外观相似的模板。脚本在复制前核对模板 SHA-256；哈希不一致时停止生成并重新确认模板版本。
 

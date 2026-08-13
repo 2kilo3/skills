@@ -13,6 +13,18 @@ from pathlib import Path
 
 LINE_RANGE = re.compile(r"^(\d+)(?:\s*-\s*(\d+))?$")
 BASELINE = re.compile(r"^>\s*源码基线：\s*(.+)$", re.MULTILINE)
+REQUIRED_CSP = {
+    "default-src": {"'none'"},
+    "base-uri": {"'none'"},
+    "connect-src": {"'none'"},
+    "form-action": {"'none'"},
+    "frame-src": {"'none'"},
+    "img-src": {"data:"},
+    "object-src": {"'none'"},
+    "script-src": {"'unsafe-inline'"},
+    "style-src": {"'unsafe-inline'"},
+}
+FORBIDDEN_HTML_TAGS = {"base", "embed", "form", "iframe", "object"}
 
 
 def clean_cell(value: str) -> str:
@@ -130,6 +142,10 @@ class CourseParser(HTMLParser):
         self.has_term = False
         self.external_resources: list[str] = []
         self.invalid_images: list[str] = []
+        self.content_security_policy: dict[str, set[str]] | None = None
+        self.content_security_policy_count = 0
+        self.forbidden_tags: list[str] = []
+        self.meta_refresh = False
         self.source_blocks: list[dict[str, str]] = []
         self.current_source: dict[str, str] | None = None
 
@@ -139,11 +155,40 @@ class CourseParser(HTMLParser):
         element_id = values.get("id")
         if element_id:
             self.ids.add(element_id)
+        if tag in FORBIDDEN_HTML_TAGS:
+            self.forbidden_tags.append(tag)
+        if tag == "meta" and values.get("http-equiv", "").lower() == "refresh":
+            self.meta_refresh = True
+        if (
+            tag == "meta"
+            and values.get("http-equiv", "").lower() == "content-security-policy"
+        ):
+            directives: dict[str, set[str]] = {}
+            for declaration in values.get("content", "").split(";"):
+                parts = declaration.strip().lower().split()
+                if parts:
+                    directives[parts[0]] = set(parts[1:])
+            self.content_security_policy = directives
+            self.content_security_policy_count += 1
 
-        for attribute in ("src", "href"):
+        for attribute in (
+            "src",
+            "href",
+            "action",
+            "formaction",
+            "data",
+            "poster",
+            "srcset",
+            "ping",
+        ):
             value = values.get(attribute, "").strip()
-            if value.startswith(("http://", "https://", "//")):
-                self.external_resources.append(value)
+            if not value:
+                continue
+            if attribute == "href" and value.startswith("#"):
+                continue
+            if tag == "img" and attribute == "src" and value.startswith("data:image/"):
+                continue
+            self.external_resources.append(f"{tag}.{attribute}={value}")
         if tag == "img" and not values.get("src", "").startswith("data:"):
             self.invalid_images.append(values.get("src", "<missing>"))
 
@@ -238,6 +283,29 @@ def validate_course(course: Path, repo: Path, min_modules: int, max_modules: int
         errors.append("course.html 必须内嵌 style 与 script")
     if parser.external_resources:
         errors.append("存在外部资源：" + ", ".join(parser.external_resources))
+    if parser.forbidden_tags:
+        errors.append("存在禁用的嵌入/导航标签：" + ", ".join(parser.forbidden_tags))
+    if parser.meta_refresh:
+        errors.append("course.html 不得使用 meta refresh")
+    if parser.content_security_policy_count != 1:
+        errors.append("course.html 必须且只能包含一个 Content-Security-Policy")
+    if parser.content_security_policy is None:
+        errors.append("缺少严格 Content-Security-Policy")
+    else:
+        unexpected = sorted(
+            set(parser.content_security_policy).difference(REQUIRED_CSP)
+        )
+        if unexpected:
+            errors.append(
+                "Content-Security-Policy 含未批准的指令：" + ", ".join(unexpected)
+            )
+        for directive, expected in REQUIRED_CSP.items():
+            actual = parser.content_security_policy.get(directive)
+            if actual != expected:
+                errors.append(
+                    f"Content-Security-Policy 的 {directive} 必须是 "
+                    + " ".join(sorted(expected))
+                )
     if parser.invalid_images:
         errors.append("图片必须使用 data URI：" + ", ".join(parser.invalid_images))
     missing_targets = [target for target in parser.nav_targets if target not in parser.ids]

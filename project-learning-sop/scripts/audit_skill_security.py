@@ -9,8 +9,10 @@ import os
 import re
 import sys
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 
 EXCLUDED_DIRS = {
@@ -47,6 +49,12 @@ ARCHIVE_SUFFIXES = {".docx", ".pptx", ".xlsx", ".zip"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_ARCHIVE_TEXT_BYTES = 20 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 500 * 1024 * 1024
+HYPERLINK_RELATIONSHIP = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+)
+ALLOWED_HYPERLINK_SCHEMES = {"http", "https", "mailto"}
 
 PATTERNS = (
     (
@@ -149,7 +157,7 @@ SUSPICIOUS_FILENAMES = {
 
 
 def relative_label(path: Path, root: Path) -> str:
-    return path.resolve().relative_to(root).as_posix()
+    return path.absolute().relative_to(root).as_posix()
 
 
 def suspicious_name(path: Path) -> str | None:
@@ -199,8 +207,15 @@ def scan_text(text: str, label: str) -> list[dict[str, object]]:
 
 def iter_files(root: Path) -> Iterable[Path]:
     for current, directories, files in os.walk(root, followlinks=False):
-        directories[:] = [name for name in directories if name not in EXCLUDED_DIRS]
         base = Path(current)
+        retained_directories = []
+        for name in directories:
+            path = base / name
+            if path.is_symlink():
+                yield path
+            elif name not in EXCLUDED_DIRS:
+                retained_directories.append(name)
+        directories[:] = retained_directories
         for name in files:
             yield base / name
 
@@ -220,6 +235,7 @@ def scan_archive(
     try:
         with zipfile.ZipFile(path) as archive:
             members = archive.infolist()
+            archive_label = relative_label(path, root)
             if len(members) > MAX_ARCHIVE_MEMBERS:
                 warnings.append(
                     {
@@ -228,7 +244,82 @@ def scan_archive(
                     }
                 )
                 return findings, warnings, scanned
+            names = [member.filename for member in members]
+            if len(names) != len(set(names)):
+                findings.append(
+                    {
+                        "severity": "error",
+                        "rule": "duplicate-archive-member",
+                        "path": archive_label,
+                        "line": None,
+                        "reason": "archive contains duplicate member names",
+                    }
+                )
+            total_size = sum(member.file_size for member in members)
+            if total_size > MAX_ARCHIVE_TOTAL_BYTES:
+                warnings.append(
+                    {
+                        "path": archive_label,
+                        "reason": "archive uncompressed size limit exceeded; manual review required",
+                    }
+                )
             for member in members:
+                member_path = PurePosixPath(member.filename.replace("\\", "/"))
+                member_label = f"{archive_label}!{member.filename}"
+                if (
+                    member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or (member_path.parts and member_path.parts[0].endswith(":"))
+                ):
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "rule": "unsafe-archive-path",
+                            "path": member_label,
+                            "line": None,
+                            "reason": "archive member path escapes the extraction root",
+                        }
+                    )
+                lowered = member.filename.lower()
+                if lowered.endswith("vbaproject.bin") or "/activex/" in f"/{lowered}":
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "rule": "active-content",
+                            "path": member_label,
+                            "line": None,
+                            "reason": "Office archive contains macros or ActiveX content",
+                        }
+                    )
+                if "/embeddings/" in f"/{lowered}" or "oleobject" in lowered:
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "rule": "embedded-object",
+                            "path": member_label,
+                            "line": None,
+                            "reason": "Office archive contains an embedded object",
+                        }
+                    )
+                if member.flag_bits & 0x1:
+                    warnings.append(
+                        {
+                            "path": member_label,
+                            "reason": "encrypted archive member cannot be inspected",
+                        }
+                    )
+                    continue
+                if member.file_size > MAX_ARCHIVE_MEMBER_BYTES or (
+                    member.compress_size
+                    and member.file_size / member.compress_size > 200
+                ):
+                    warnings.append(
+                        {
+                            "path": member_label,
+                            "reason": "archive member size or compression ratio requires manual review",
+                        }
+                    )
+                    continue
                 if member.is_dir() or not archive_member_is_text(member.filename):
                     continue
                 if member.file_size > MAX_TEXT_BYTES:
@@ -249,9 +340,59 @@ def scan_archive(
                     )
                     break
                 text = archive.read(member).decode("utf-8", errors="replace")
-                findings.extend(
-                    scan_text(text, f"{relative_label(path, root)}!{member.filename}")
-                )
+                findings.extend(scan_text(text, member_label))
+                lowered_text = text.lower()
+                if member.filename.lower().endswith((".xml", ".rels")) and (
+                    "<!doctype" in lowered_text or "<!entity" in lowered_text
+                ):
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "rule": "unsafe-xml-declaration",
+                            "path": member_label,
+                            "line": None,
+                            "reason": "Office XML contains a DTD or entity declaration",
+                        }
+                    )
+                    continue
+                if member.filename.lower().endswith(".rels"):
+                    try:
+                        relationships = ElementTree.fromstring(text)
+                    except ElementTree.ParseError:
+                        warnings.append(
+                            {
+                                "path": member_label,
+                                "reason": "relationship XML could not be parsed",
+                            }
+                        )
+                    else:
+                        unsafe_external = False
+                        for relationship in relationships:
+                            if (
+                                relationship.attrib.get("TargetMode", "").lower()
+                                != "external"
+                            ):
+                                continue
+                            if relationship.attrib.get("Type") != HYPERLINK_RELATIONSHIP:
+                                unsafe_external = True
+                                break
+                            target = relationship.attrib.get("Target", "")
+                            if (
+                                urlsplit(target).scheme.lower()
+                                not in ALLOWED_HYPERLINK_SCHEMES
+                            ):
+                                unsafe_external = True
+                                break
+                        if unsafe_external:
+                            findings.append(
+                                {
+                                    "severity": "error",
+                                    "rule": "external-relationship",
+                                    "path": member_label,
+                                    "line": None,
+                                    "reason": "Office relationship points to an external resource",
+                                }
+                            )
                 scanned += 1
     except (OSError, zipfile.BadZipFile) as exc:
         warnings.append(

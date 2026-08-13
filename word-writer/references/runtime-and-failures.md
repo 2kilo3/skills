@@ -55,7 +55,7 @@ Run the preflight again with the virtual environment's Python. Do not continue i
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
 | `ModuleNotFoundError: docx` | Wrong interpreter or missing `python-docx` | switch interpreter; otherwise install dependency |
-| `.doc` cannot convert | No LibreOffice/Word | request `.docx` or install one converter |
+| `.doc` cannot convert | Microsoft Word unavailable or input is not trusted | request a `.docx` produced in a trusted environment; do not automate opaque `.doc` through LibreOffice |
 | audit reports nonstandard fonts | unnormalized OOXML story or newly edited output | normalize again, then audit the exact final file |
 | rendered CJK glyphs differ | fonts missing/substituted | install required fonts and re-render |
 | footer contains extra text | source footer not fully cleared or later edit reintroduced it | normalize exact final file again |

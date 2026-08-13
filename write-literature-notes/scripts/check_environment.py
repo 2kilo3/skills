@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from importlib import metadata
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -17,10 +19,25 @@ except ImportError:  # pragma: no cover - non-Windows
 
 
 ASSET_HASHES = {
-    "reading-note-template.docx": "4824159895BDA6297DEF7DEFDCE79CD406D88BE40C6D9ED4AA9ABBEF680A387C",
-    "teacher-reference.docx": "55193C302629F43710772B41191EB83FDCEE2DE0F8A22C13D217297D8939A5BE",
-    "recent-style-reference.docx": "8B299A53899E773E48DC92170E603659FE5E4EE2EC6FB30137B166A151FCEB5F",
+    "reading-note-template.docx": "B2E31C1B2CF8870810F596E725F48088DB2DDFBC7E629CC60262BB8A75A5F932",
+    "teacher-reference.docx": "FAED7BA4511380925BE4AD27E4EFDAF6AE3DC235AB20EB4984586C4CB91371AB",
+    "recent-style-reference.docx": "B4A39E8393BF5FE81EBBAC1B80DCDC934F957688613E4E25750A94BFFBB67AF3",
 }
+REQUIRED_PACKAGES = {
+    "python-docx": ("docx", (1, 2, 0), 2),
+    "lxml": ("lxml", (5, 0, 0), 7),
+}
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(number) for number in re.findall(r"\d+", value)[:3])
+
+
+def version_supported(value: str | None, minimum: tuple[int, ...], maximum_major: int) -> bool:
+    if value is None:
+        return False
+    parsed = version_tuple(value)
+    return bool(parsed) and parsed >= minimum and parsed[0] < maximum_major
 
 
 def sha256(path: Path) -> str:
@@ -60,7 +77,15 @@ def main() -> int:
     assets_dir = skill_dir / "assets"
     packages = {
         name: importlib.util.find_spec(module) is not None
-        for name, module in {"python-docx": "docx", "lxml": "lxml"}.items()
+        for name, (module, _, _) in REQUIRED_PACKAGES.items()
+    }
+    versions = {
+        name: metadata.version(name) if packages[name] else None
+        for name in REQUIRED_PACKAGES
+    }
+    versions_match = {
+        name: version_supported(versions[name], minimum, maximum_major)
+        for name, (_, minimum, maximum_major) in REQUIRED_PACKAGES.items()
     }
     assets = {}
     for name, expected in ASSET_HASHES.items():
@@ -77,6 +102,7 @@ def main() -> int:
     core_ready = (
         sys.version_info >= (3, 10)
         and all(packages.values())
+        and all(versions_match.values())
         and assets["reading-note-template.docx"]["sha256_ok"]
     )
     renderer_ready = bool(soffice or word)
@@ -89,7 +115,22 @@ def main() -> int:
         actions.append("Use Python 3.10 or newer.")
     missing = [name for name, available in packages.items() if not available]
     if missing:
-        actions.append("Select a Python environment containing: " + ", ".join(missing))
+        actions.append(
+            "Select another Python environment or, after approval, create an isolated "
+            "environment and install scripts/requirements.txt. Missing: "
+            + ", ".join(missing)
+        )
+    mismatched = [
+        f"{name}={versions[name]} (supported >= {minimum} and < {maximum_major}.0.0)"
+        for name, (_, minimum, maximum_major) in REQUIRED_PACKAGES.items()
+        if packages[name] and not versions_match[name]
+    ]
+    if mismatched:
+        actions.append(
+            "Use compatible versions from scripts/requirements.txt in an isolated "
+            "environment. Version mismatch: "
+            + ", ".join(mismatched)
+        )
     if not assets["reading-note-template.docx"]["sha256_ok"]:
         actions.append("Restore the locked reading-note-template.docx asset.")
     if not renderer_ready:
@@ -106,6 +147,8 @@ def main() -> int:
             "utf8_mode": bool(sys.flags.utf8_mode),
         },
         "packages": packages,
+        "versions": versions,
+        "versions_match": versions_match,
         "assets": assets,
         "renderers": {"libreoffice": soffice, "microsoft_word": word},
         "actions": actions,
