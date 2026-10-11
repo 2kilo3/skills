@@ -1,14 +1,22 @@
 # Security Audit
 
-Last reviewed: 2026-08-13
+## Current repository status — 2026-10-11
 
-## Scope
+The repository contains three skills: `humanier-jf`, `word-writer`, and `write-literature-notes`. The repository-learning skill and the root regression test directory have been removed. Humanier-JF includes Chinese technical-document rules and protections for facts, qualifications, terminology, code, and document structure.
+
+All three skill structure validations passed. Both remaining bundled security audits returned `status: pass`, including 35 inspected Office text members. README links and commands were checked for references to removed paths. The regression suite described below is no longer included; its results are historical evidence, not verification of the current tree. This cleanup does not repeat the historical Office rendering or Git history review.
+
+## Historical review — 2026-08-13
+
+The following record describes the repository at the time of that review, including components that have since been removed.
+
+### Scope
 
 This review covered all four skill directories, their scripts and bundled assets, the current worktree, and all seven reachable Git commits. The Office review inspected 21 reachable DOCX versions, including ZIP paths, relationships, active content, embedded objects, author properties, email addresses, and machine-specific paths.
 
 The review combined manual data-flow and subprocess inspection with repository secret scans, Office archive scans, regression tests, environment checks, real DOCX generation and normalization, Microsoft Word PDF rendering, and visual inspection of the rendered pages.
 
-## Findings and fixes
+### Findings and fixes
 
 | Area | Finding | Resolution |
 | --- | --- | --- |
@@ -21,7 +29,7 @@ The review combined manual data-flow and subprocess inspection with repository s
 | Repository inspection | Git status queries could invoke a repository-configured filesystem monitor. | Run bundled read-only Git preflight commands with `core.fsmonitor=false`. |
 | Dependencies | Literature-note package compatibility was implicit. | Added bounded `python-docx` and `lxml` requirements and version-aware environment checks. |
 
-## Verification
+### Verification
 
 - Regression suite: 19 tests passed. Three real Windows symlink-creation subcases were skipped because the current account lacks the required privilege; mocked tests cover the same non-traversal and rejection branches.
 - Python compilation: all scripts and tests compiled successfully under Python 3.12.13.
@@ -31,7 +39,7 @@ The review combined manual data-flow and subprocess inspection with repository s
 - Office history scan: 21 reachable DOCX versions inspected, with no remaining finding.
 - End-to-end document checks: the locked literature template generated a valid 13-row note; Word Writer preserved paragraph, table, section, and image counts; the source rendered to one A4 page and the normalized copy to two A4 pages in Microsoft Word. Both passed visual inspection.
 
-## Residual boundaries
+### Residual boundaries
 
 No unresolved issue is known within the reviewed tree and history. This is not a proof that unknown vulnerabilities do not exist. Microsoft Word, LibreOffice, Python, Git, and installed dependencies remain trusted components. Real papers, documents, repositories, and generated outputs may contain private material even when the skill code is clean; review those inputs and outputs under their own disclosure rules.
 
